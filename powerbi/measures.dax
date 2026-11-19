@@ -1,0 +1,6 @@
+MRR = SUM(fact_subscription_monthly[mrr_amount])
+Active Customers = SUM(fact_subscription_monthly[active_customer_count])
+ARPA = DIVIDE([MRR],[Active Customers])
+Average Revenue per Seat = DIVIDE([MRR],SUM(fact_subscription_monthly[seats]))
+Previous Month MRR = CALCULATE([MRR],DATEADD(dim_month[month_start],-1,MONTH))
+MRR MoM Change % = DIVIDE([MRR]-[Previous Month MRR],[Previous Month MRR])
