@@ -1,39 +1,30 @@
 from pathlib import Path
 import sys
-
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-
 from src.data.generate import generate_subscriptions
-from src.metrics.subscription_metrics import (
-    monthly_metrics, cohort_retention, validate_subscriptions,
-)
+from src.metrics.subscription_metrics import monthly_metrics, cohort_retention, validate_subscriptions
 from src.metrics.customer_health import score_customer_health, retention_opportunity
+from src.metrics.business_intelligence import segment_revenue_change, forecast_metric, detect_metric_changes
 
-st.set_page_config(page_title="SaaS Retention Command Center", page_icon="📈", layout="wide")
-st.title("SaaS Retention Command Center")
-st.caption(
-    "A practical guide to subscription health: understand revenue, find accounts at risk, "
-    "and decide where a customer-success team should investigate."
-)
-st.info(
-    "Demo dataset: this app uses synthetic subscription data. The figures demonstrate how "
-    "the analysis works; they are not results from a real company."
-)
+st.set_page_config(page_title="Business Investigation Workbench", page_icon="📊", layout="wide")
+st.title("Business Investigation Workbench")
+st.caption("Move from business data to an explanation, an estimate of what may happen next, and a decision someone can verify.")
+st.info("Portfolio demo using synthetic subscription data. Forecasts and scenarios are estimates, not guarantees. The app does not prove that one factor caused another.")
 
 uploaded = st.sidebar.file_uploader("Upload subscriptions CSV", type=["csv"])
-st.sidebar.caption(
-    "Use a CSV with one row per customer. Required fields: customer_id, signup_date, "
-    "monthly_price, status, churn_date. Optional engagement fields improve the risk score."
-)
+st.sidebar.caption("Expected: one row per customer, with customer_id, signup_date, monthly_price, status and churn_date. Optional fields include plan, acquisition_channel, industry, product usage, support tickets, payment failures and NPS.")
 data_path = ROOT / "data/raw/subscriptions.csv"
 if uploaded:
     try:
-        df = pd.read_csv(uploaded, parse_dates=["signup_date", "churn_date"])
+        df = pd.read_csv(uploaded)
+        for col in ["signup_date", "churn_date"]:
+            if col in df:
+                df[col] = pd.to_datetime(df[col], errors="coerce")
     except Exception as exc:
         st.error(f"Could not read this CSV: {exc}")
         st.stop()
@@ -41,13 +32,11 @@ elif data_path.exists():
     df = pd.read_csv(data_path, parse_dates=["signup_date", "churn_date"])
 else:
     df = generate_subscriptions()
-    data_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(data_path, index=False)
 
 try:
     validate_subscriptions(df)
-except ValueError as exc:
-    st.error(f"The uploaded data needs attention: {exc}")
+except (ValueError, KeyError, TypeError) as exc:
+    st.error(f"The data needs attention before analysis: {exc}")
     st.stop()
 
 if "plan" in df:
@@ -59,224 +48,174 @@ metrics = monthly_metrics(df)
 if metrics.empty:
     st.warning("There are no records for the selected filters.")
     st.stop()
-
 latest = metrics.iloc[-1]
 previous = metrics.iloc[-2] if len(metrics) > 1 else None
 scored = score_customer_health(df)
 active_scored = scored[scored.status.eq("Active")].copy()
-overview, command, cohorts, drivers, scenario = st.tabs([
-    "Executive overview", "Retention command center", "Cohort retention",
-    "Churn drivers", "Revenue simulator"
-])
 
 def money(value):
-    return f"${value:,.0f}"
+    return "$" + format(value, ",.0f")
+
+overview, investigate, forecast_tab, alerts, command, cohorts, decisions, briefing = st.tabs([
+    "Business overview", "Why did it change?", "What happens next?", "Early warnings",
+    "Customer actions", "Customer retention", "What-if decisions", "Business briefing"
+])
 
 with overview:
-    st.subheader("Subscription business health")
-    st.write(
-        "Start here for a snapshot of the business. These measures describe the latest month "
-        "in the dataset after applying the plan filter."
-    )
+    st.subheader("Current business position")
     a, b, c, d = st.columns(4)
-    a.metric("Active customers", f"{int(latest.active_customers):,}",
-             delta=(int(latest.active_customers - previous.active_customers) if previous is not None else None))
-    b.metric("Monthly recurring revenue (MRR)", money(latest.mrr),
-             delta=(money(latest.mrr - previous.mrr) if previous is not None else None))
-    c.metric("Monthly customer churn", f"{latest.monthly_churn_rate:.1%}")
-    d.metric("Average revenue per account (ARPA)", f"${latest.arpa:,.2f}")
-    with st.expander("What do these four numbers mean?"):
-        st.markdown(
-            "- **Active customers:** customers with an active subscription at month end.\n"
-            "- **MRR:** monthly subscription revenue from active customers. It excludes one-time fees.\n"
-            "- **Monthly customer churn:** customers who cancelled during the month divided by customers active at the start of that month.\n"
-            "- **ARPA:** MRR divided by active customers. It is the average monthly subscription revenue per active account."
-        )
+    a.metric("Active customers", f"{int(latest.active_customers):,}", delta=(int(latest.active_customers - previous.active_customers) if previous is not None else None))
+    b.metric("Monthly recurring revenue", money(latest.mrr), delta=(money(latest.mrr - previous.mrr) if previous is not None else None))
+    c.metric("Monthly churn", f"{latest.monthly_churn_rate:.1%}")
+    d.metric("Average revenue per customer", money(latest.arpa))
+    st.caption("MRR is recurring subscription revenue at month end. Churn is the share of customers active at the start of the month who cancelled during it.")
     left, right = st.columns(2)
-    left.plotly_chart(px.line(metrics, x="month", y="mrr", markers=True,
-                              title="Monthly recurring revenue (MRR)"), use_container_width=True)
-    right.plotly_chart(px.line(metrics, x="month", y="active_customers", markers=True,
-                               title="Active customers over time"), use_container_width=True)
-    st.caption(
-        "How to read these lines: each point represents one month. An upward MRR line means "
-        "subscription revenue is growing; an upward active-customer line means the active base is growing."
-    )
-    st.plotly_chart(px.line(metrics, x="month", y="monthly_churn_rate", markers=True,
-                            title="Monthly customer churn rate"), use_container_width=True)
-    st.caption(
-        "Lower is generally better. A spike means a larger share of the opening customer base cancelled "
-        "in that month. Compare several months rather than judging one point alone."
-    )
-    if previous is not None:
-        mrr_change = latest.mrr - previous.mrr
-        active_change = latest.active_customers - previous.active_customers
-        churn_direction = "higher" if latest.monthly_churn_rate > previous.monthly_churn_rate else "lower"
-        st.markdown("**What the latest month shows**")
-        st.write(
-            f"Compared with the previous month, MRR is {money(abs(mrr_change))} "
-            f"{'higher' if mrr_change >= 0 else 'lower'} and the active customer count is "
-            f"{abs(int(active_change))} {'higher' if active_change >= 0 else 'lower'}. "
-            f"The churn rate is {churn_direction} than the previous month."
-        )
+    left.plotly_chart(px.line(metrics, x="month", y="mrr", markers=True, title="Monthly recurring revenue"), use_container_width=True)
+    right.plotly_chart(px.line(metrics, x="month", y="active_customers", markers=True, title="Active customers"), use_container_width=True)
+    st.plotly_chart(px.line(metrics, x="month", y="monthly_churn_rate", markers=True, title="Monthly customer churn"), use_container_width=True)
+    st.download_button("Download monthly business metrics", metrics.to_csv(index=False), "monthly_metrics.csv")
+
+with investigate:
+    st.subheader("Investigate a change in the business")
+    st.write("Choose a measure and a business area. The app compares the latest month with the month before it and shows which groups contributed most to the change.")
+    if previous is None:
+        st.warning("At least two months are needed to investigate a change.")
     else:
-        st.info("Only one month is available, so a month-over-month comparison is not possible.")
-    st.download_button("Download monthly metrics", metrics.to_csv(index=False),
-                       "monthly_metrics.csv", help="Export the monthly figures shown above.")
+        measure = st.selectbox("What changed?", ["Monthly recurring revenue", "Active customers", "Monthly churn rate"])
+        dims = [c for c in ["plan", "acquisition_channel", "industry"] if c in df.columns]
+        if not dims:
+            st.warning("Add a plan, acquisition_channel or industry column to investigate differences between groups.")
+        else:
+            dimension = st.selectbox("Break it down by", dims, format_func=lambda x: x.replace("_", " ").title())
+            if measure == "Monthly recurring revenue":
+                breakdown = segment_revenue_change(df, previous.month, latest.month, dimension)
+                delta = float(latest.mrr - previous.mrr)
+                st.metric("Overall MRR change", money(delta))
+                st.write("Groups with the largest declines appear first. A group's change is its current recurring revenue minus its previous-month recurring revenue.")
+                display = breakdown.rename(columns={dimension: "Group", "current_revenue": "Current MRR", "previous_revenue": "Previous MRR", "change": "Change", "change_pct": "Change %"})
+                st.dataframe(display.style.format({"Current MRR": "$" + "{:,.0f}", "Previous MRR": "$" + "{:,.0f}", "Change": "$" + "{:,.0f}", "Change %": "{:.1f}%"}), use_container_width=True, hide_index=True)
+                if not breakdown.empty:
+                    worst = breakdown.iloc[0]
+                    if worst["change"] < 0:
+                        st.warning(f"{worst[dimension]} had the largest decline: {money(worst['change'])}. This identifies where to investigate; it does not prove why the decline happened.")
+                    else:
+                        st.success("No segment in this breakdown had a revenue decline.")
+                    st.plotly_chart(px.bar(breakdown, x=dimension, y="change", title="MRR change by group", labels={"change": "Change in MRR"}), use_container_width=True)
+            elif measure == "Active customers":
+                st.metric("Change in active customers", f"{int(latest.active_customers - previous.active_customers):+,}")
+                st.write("Customer counts are compared at each month end. Segment-level customer movement is a planned extension.")
+            else:
+                st.metric("Change in churn rate", f"{latest.monthly_churn_rate - previous.monthly_churn_rate:+.1%}")
+                st.write(f"Churn moved from {previous.monthly_churn_rate:.1%} to {latest.monthly_churn_rate:.1%}. Check Customer Retention for cancellation patterns and customer signals.")
+    st.caption("Business impact is measured in subscription revenue and customer counts. Other effects, such as support cost or brand impact, are not included unless those data are supplied.")
+
+with forecast_tab:
+    st.subheader("Estimate what may happen next")
+    st.write("This first version extends the recent trend. It is a baseline estimate, not a machine-learning model or a promise of future results.")
+    choice = st.selectbox("Forecast", ["Monthly recurring revenue", "Active customers"])
+    column = "mrr" if choice == "Monthly recurring revenue" else "active_customers"
+    horizon = st.slider("Months to estimate", 3, 12, 6)
+    try:
+        projection = forecast_metric(metrics, column, horizon)
+        history = metrics[["month", column]].rename(columns={column: "value"})
+        history["series"] = "Historical"
+        future = projection[["month", "forecast"]].rename(columns={"forecast": "value"})
+        future["series"] = "Trend estimate"
+        combined = pd.concat([history, future], ignore_index=True)
+        st.plotly_chart(px.line(combined, x="month", y="value", color="series", markers=True, title=f"{choice}: history and trend estimate"), use_container_width=True)
+        shown = projection.rename(columns={"month": "Month", "forecast": "Expected", "lower_estimate": "Lower estimate", "upper_estimate": "Upper estimate"})
+        st.dataframe(shown.style.format({"Expected": "{:,.0f}", "Lower estimate": "{:,.0f}", "Upper estimate": "{:,.0f}"}), use_container_width=True, hide_index=True)
+        st.caption("The estimate range is based on past trend errors, not a formal guarantee. Seasonality, market changes, pricing and new customer activity can make the estimate wrong.")
+    except ValueError as exc:
+        st.warning(str(exc))
+
+with alerts:
+    st.subheader("Early warning signals")
+    st.write("These checks flag unusually large month-to-month movements. They help decide where to look; they do not identify the cause.")
+    alert_data = detect_metric_changes(metrics, "mrr")
+    unusual = alert_data[alert_data.unusual]
+    if unusual.empty:
+        st.success("No unusually large MRR changes were flagged by the current rule.")
+    else:
+        for _, item in unusual.iterrows():
+            direction = "increased" if item.change > 0 else "decreased"
+            st.warning(f"{pd.Timestamp(item.month).strftime('%B %Y')}: MRR {direction} by {abs(item.change_pct):.1f}% ({money(item.change)}). Review the investigation tab for segment breakdowns.")
+    st.dataframe(alert_data.tail(12).rename(columns={"month": "Month", "mrr": "MRR", "change": "Dollar change", "change_pct": "Percent change", "unusual": "Flagged"}), use_container_width=True, hide_index=True)
+    st.caption("The flag uses the historical median and spread of percentage changes, with a minimum 10% threshold. It is a screening rule, not a trained anomaly detector.")
 
 with command:
-    st.subheader("Who should the customer-success team contact first?")
-    st.write(
-        "This section ranks active accounts by a rule-based risk score. It helps a team decide "
-        "which customers to investigate first; it does not predict with certainty who will cancel."
-    )
+    st.subheader("Which customers need attention?")
+    st.write("This ranks active accounts using product usage, usage decline, support tickets, failed payments and NPS. It is a rule-based score, not a validated prediction of who will cancel.")
     opportunity = retention_opportunity(scored, 100, 30)
     a, b, c = st.columns(3)
     a.metric("High-risk active accounts", f"{opportunity['high_risk_customers']:,}")
-    b.metric("Risk-adjusted monthly revenue", money(opportunity["revenue_at_risk"]))
+    b.metric("Risk-weighted monthly revenue", money(opportunity["revenue_at_risk"]))
     c.metric("Active accounts assessed", f"{len(active_scored):,}")
-    with st.expander("How the customer risk score is calculated"):
-        st.markdown(
-            "The score runs from **0 to 100**. Higher means more risk in this model. "
-            "Each input is converted to a 0–100 risk value and combined using these weights:\n\n"
-            "- Product usage: **30%**\n- Recent usage decline: **20%**\n"
-            "- Support ticket volume: **15%**\n- Failed payments: **20%**\n- NPS feedback: **15%**\n\n"
-            "Risk bands: **Low = 0–34**, **Medium = 35–64**, **High = 65–100**. "
-            "These are hand-set rules for this portfolio demo, not statistically validated thresholds."
-        )
+    with st.expander("How the customer risk score works"):
+        st.markdown("The score runs from 0 to 100. It combines product usage (30%), recent usage decline (20%), support tickets (15%), failed payments (20%) and NPS (15%). Higher scores mean more warning signs under these hand-set rules.")
     if not active_scored.empty:
-        band_counts = (active_scored["risk_band"].value_counts()
-                       .reindex(["Low", "Medium", "High"], fill_value=0)
-                       .rename_axis("risk_band").reset_index(name="accounts"))
-        st.plotly_chart(px.bar(band_counts, x="risk_band", y="accounts",
-                               category_orders={"risk_band": ["Low", "Medium", "High"]},
-                               title="Active accounts by modeled risk band"),
-                        use_container_width=True)
-        st.caption(
-            "Each bar counts active customers in that risk band. A larger High bar means more "
-            "accounts need review. Use the account table below to see the signals behind each score."
-        )
-        high = active_scored[active_scored.risk_band.eq("High")].sort_values(
-            "revenue_at_risk", ascending=False
-        )
-        if high.empty:
-            st.success("No active accounts fall into the High-risk band under the current rules.")
+        bands = active_scored.risk_band.value_counts().reindex(["Low", "Medium", "High"], fill_value=0).rename_axis("Risk level").reset_index(name="Customers")
+        st.plotly_chart(px.bar(bands, x="Risk level", y="Customers", title="Active customers by risk level"), use_container_width=True)
+        high = active_scored[active_scored.risk_band.eq("High")].sort_values("revenue_at_risk", ascending=False)
+        if not high.empty:
+            cols = ["customer_id", "plan", "monthly_price", "risk_score", "revenue_at_risk", "product_usage_score", "usage_change_pct", "support_tickets_90d", "payment_failures_90d", "nps_score", "recommended_action"]
+            st.dataframe(high[cols].head(50), use_container_width=True, hide_index=True)
+            st.download_button("Export customer follow-up list", high[cols].to_csv(index=False), "customer_follow_up.csv")
         else:
-            st.markdown("**Accounts to review first**")
-            st.write(
-                "The list is ordered by risk-adjusted monthly revenue, so accounts with both a high "
-                "score and a larger subscription value appear first."
-            )
-            view = high[[
-                "customer_id", "plan", "monthly_price", "risk_score", "revenue_at_risk",
-                "product_usage_score", "usage_change_pct", "support_tickets_90d",
-                "payment_failures_90d", "nps_score", "recommended_action"
-            ]]
-            st.dataframe(view.head(50), use_container_width=True, hide_index=True)
-            st.download_button("Export prioritized retention queue", view.to_csv(index=False),
-                               "retention_action_queue.csv")
-    else:
-        st.info("No active accounts are available under the current filters.")
-    st.caption(
-        "Risk-adjusted monthly revenue = monthly subscription price × risk score ÷ 100. "
-        "It is a prioritization estimate, not a forecast of revenue that will definitely be lost."
-    )
+            st.info("No active accounts are in the High-risk band under these rules.")
+    st.caption("Risk-weighted revenue is monthly price multiplied by risk score. It is a prioritization aid, not revenue certain to be lost.")
 
 with cohorts:
-    st.subheader("Do customers stay after they sign up?")
-    st.write(
-        "A cohort is a group of customers who signed up in the same month. This view follows each "
-        "group over the months after signup to show what share remains active."
-    )
+    st.subheader("Do customers stay after signing up?")
     matrix = cohort_retention(df)
     if matrix.empty:
         st.info("There is not enough signup history to build a cohort view.")
     else:
-        st.plotly_chart(px.imshow(
-            matrix, aspect="auto", color_continuous_scale="Blues",
-            labels={"x": "Months since signup", "y": "Signup cohort", "color": "Retention"},
-            title="Customer retention by signup cohort"
-        ), use_container_width=True)
-        st.caption(
-            "How to read the heatmap: each row is a signup-month cohort; each column is the number "
-            "of months since signup. Each cell is the percentage still active. Darker cells indicate "
-            "higher retention. Compare the same column across rows to compare cohorts at the same age."
-        )
-        last_age = matrix.apply(lambda row: row.dropna().iloc[-1] if row.notna().any() else float("nan"), axis=1)
-        st.markdown("**What the cohort data shows**")
-        if len(last_age.dropna()) > 1:
-            best = last_age.idxmax()
-            worst = last_age.idxmin()
-            st.write(
-                f"Among the displayed cohorts, **{best}** has the highest retention at its latest "
-                f"observed age ({last_age.max():.0%}); **{worst}** has the lowest "
-                f"({last_age.min():.0%}). Cohorts have different follow-up lengths, so compare "
-                "the same month-since-signup column for a fair comparison."
-            )
-        else:
-            st.write("More signup cohorts are needed before comparing retention patterns.")
-        st.download_button("Download cohort matrix", matrix.to_csv(), "cohort_retention.csv")
+        st.plotly_chart(px.imshow(matrix, aspect="auto", color_continuous_scale="Blues", labels={"x": "Months since signup", "y": "Signup month", "color": "Still active"}, title="Customer retention by signup month"), use_container_width=True)
+        st.caption("Each row is a group of customers who signed up in the same month. Each column shows how many months have passed since signup. Darker cells mean more customers stayed.")
+        st.download_button("Download retention table", matrix.to_csv(), "cohort_retention.csv")
 
-with drivers:
-    st.subheader("Why did customers cancel?")
-    churned = df[df.status.eq("Churned")].copy()
-    if churned.empty:
-        st.info("No churned customers are present in this filtered dataset.")
-    elif "churn_reason" not in churned.columns:
-        st.warning("The uploaded data has no churn_reason field, so cancellation reasons cannot be analyzed.")
-    else:
-        counts = (churned["churn_reason"].fillna("Not recorded")
-                  .value_counts().rename_axis("reason").reset_index(name="customers"))
-        total = int(counts.customers.sum())
-        counts["share"] = counts.customers / total
-        top = counts.iloc[0]
-        st.plotly_chart(px.bar(
-            counts, x="reason", y="customers", text="customers",
-            title="Customers who cancelled, grouped by reported reason",
-            labels={"reason": "Reported cancellation reason", "customers": "Customers"}
-        ), use_container_width=True)
-        st.caption(
-            "Each bar counts churned customers who gave that reason. The bars show frequency, "
-            "not the financial impact of each reason and not proof of the underlying cause."
-        )
-        st.markdown("**What the cancellation data shows**")
-        st.write(
-            f"The most frequently recorded reason is **{top.reason}** "
-            f"({int(top.customers)} of {total} cancellations, or {top.share:.1%}). "
-            "This is a useful place to investigate first. It does not establish that this factor caused the cancellations."
-        )
-        st.markdown("**Cancellation reasons by subscription plan**")
-        by_plan = (churned.assign(churn_reason=churned.churn_reason.fillna("Not recorded"))
-                   .groupby(["plan", "churn_reason"], dropna=False).size()
-                   .reset_index(name="customers"))
-        st.caption(
-            "Each row counts cancellations for one plan and one reported reason. Use it to see "
-            "whether a reason is concentrated in a particular plan."
-        )
-        st.dataframe(by_plan, use_container_width=True, hide_index=True)
-        st.download_button("Download churn breakdown", by_plan.to_csv(index=False),
-                           "churn_reason_by_plan.csv")
-
-with scenario:
-    st.subheader("What if we contact at-risk customers?")
-    st.write(
-        "Change the two assumptions below to estimate how much risk-adjusted monthly revenue "
-        "could be retained in a hypothetical outreach campaign."
-    )
-    coverage = st.slider("Share of high-risk accounts contacted", 0, 100, 80, 5)
-    save_rate = st.slider("Assumed save rate among contacted accounts", 0, 100, 25, 5)
-    result = retention_opportunity(scored, coverage, save_rate)
+with decisions:
+    st.subheader("Test a business decision before acting")
+    st.write("Change the assumptions to see how a lower churn rate or a price change could affect recurring revenue. This is a simplified scenario, not a causal forecast.")
+    customers = max(0, int(latest.active_customers))
+    arpa = float(latest.arpa)
+    churn = float(latest.monthly_churn_rate)
+    reduction = st.slider("Assumed monthly churn reduction (percentage points)", 0.0, 5.0, 1.0, 0.25)
+    price_change = st.slider("Assumed price change (%)", -10, 15, 0, 1)
+    scenario_churn = max(0.0, churn - reduction / 100)
+    baseline = sum(customers * ((1-churn) ** m) * arpa for m in range(1, 13))
+    scenario = sum(customers * ((1-scenario_churn) ** m) * arpa * (1+price_change/100) for m in range(1, 13))
+    impact = scenario - baseline
     x, y, z = st.columns(3)
-    x.metric("Risk-adjusted monthly revenue", money(result["revenue_at_risk"]))
-    y.metric("High-risk accounts to contact",
-             f"{round(result['high_risk_customers'] * coverage / 100):,}")
-    z.metric("Modeled monthly revenue retained", money(result["modeled_revenue_retained"]))
-    st.markdown("**How this estimate is calculated**")
-    st.write(
-        "Risk-adjusted revenue × outreach coverage × assumed save rate. "
-        "For example, 80% coverage means the team contacts an estimated 80% of high-risk accounts. "
-        "A 25% save rate assumes one in four contacted accounts is retained."
-    )
-    st.caption(
-        "This is an illustrative what-if calculation based on a rule-based risk score and user-entered "
-        "assumptions. It is not a causal estimate, a forecast, or a guarantee of saved revenue."
-    )
+    x.metric("Baseline 12-month revenue", money(baseline))
+    y.metric("Scenario 12-month revenue", money(scenario))
+    z.metric("Modeled difference", money(impact), delta=money(impact))
+    st.write(f"Assumptions: {customers:,} current customers, {churn:.1%} monthly churn and {money(arpa)} average monthly revenue per customer. The model holds new signups and customer mix constant.")
+    st.caption("This does not model customer reactions to price changes, seasonality, costs, discounts or acquisition. Do not use it as a financial forecast.")
+
+with briefing:
+    st.subheader("Business briefing")
+    st.write("A draft summary of the current dataset that an analyst can review and share.")
+    if previous is not None:
+        mrr_delta = float(latest.mrr - previous.mrr)
+        customer_delta = int(latest.active_customers - previous.active_customers)
+        churn_delta = float(latest.monthly_churn_rate - previous.monthly_churn_rate)
+        lines = [
+            "## Subscription business update",
+            f"**Latest month:** {pd.Timestamp(latest.month).strftime('%B %Y')}",
+            f"- Monthly recurring revenue: {money(latest.mrr)} ({money(mrr_delta)} vs. previous month).",
+            f"- Active customers: {int(latest.active_customers):,} ({customer_delta:+,} vs. previous month).",
+            f"- Monthly churn: {latest.monthly_churn_rate:.1%} ({churn_delta:+.1%} vs. previous month).",
+        ]
+        by_plan = segment_revenue_change(df, previous.month, latest.month, "plan") if "plan" in df else pd.DataFrame()
+        if not by_plan.empty:
+            worst = by_plan.iloc[0]
+            lines.append(f"- Largest plan-level MRR decline: {worst['plan']} ({money(worst['change'])}). This is a place to investigate, not proof of cause.")
+        lines.append(f"- Unusual MRR movements flagged: {int(detect_metric_changes(metrics, 'mrr').unusual.sum())}.")
+        lines.append("- Limitations: data is synthetic; risk scores are rule-based; forecasts are simple trend estimates; segment differences do not prove causation.")
+        report = "\n".join(lines)
+        st.markdown(report)
+        st.download_button("Download business briefing", report, "business_briefing.md")
+    else:
+        st.info("A previous month is needed to prepare a month-over-month briefing.")
