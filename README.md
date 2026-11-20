@@ -1,60 +1,51 @@
 # SaaS Churn & Retention Executive Dashboard
 
-**Live demo:** Not deployed yet. Run locally using the steps below.  
-**Demo walkthrough:** See [the 30-second walkthrough outline](docs/demo_script.md).
+**Live demo:** Not deployed yet. Run locally using the steps below.
 
-## Executive summary
+## The business problem
 
-Built for a VP of Customer Success and SaaS Finance lead who need to decide where retention effort should go and how churn changes could affect recurring revenue.
+A subscription business can see how many customers cancelled last month, but that does not tell its customer-success team who to contact today. This project turns subscription, product-usage, support, billing, and feedback signals into an explainable retention action queue.
 
-- Tracks monthly recurring revenue (MRR), active customers, ARPA, churn, and signup-cohort retention.
-- Builds a small warehouse star schema from deliberately messy, multi-table source data.
-- Reports duplicates, missing values, malformed dates, noncanonical categories, and invalid negative prices.
-- Includes a what-if control to estimate revenue retained under a lower monthly churn assumption. Results are illustrative, not realized savings.
+**Primary users:** VP of Customer Success and SaaS Finance lead.  
+**Decision supported:** Which active accounts should the team contact first, what action should they take, and what recurring revenue is exposed?
+
+## The differentiator: Retention Command Center
+
+The project goes beyond a standard churn dashboard with an explainable customer-health score and next-best-action queue.
+
+- Scores each active account from 0 (lower risk) to 100 (higher risk) using product usage, usage decline, support burden, payment failures, and NPS.
+- Explains the score using fixed weights rather than a black-box model.
+- Recommends a next action such as payment recovery, service escalation, guided onboarding, or a customer-success check-in.
+- Ranks high-risk accounts by risk-adjusted monthly revenue and exports a prioritized contact queue.
+- Simulates the modeled revenue retained under user-selected outreach coverage and assumed save rate.
+
+The score is a transparent heuristic, not a trained or validated prediction model. The intervention simulator is a what-if calculation, not a causal estimate or guarantee.
+
+## Executive dashboard
+
+The app includes five workspaces:
+1. **Executive overview:** MRR, active customers, churn, ARPA, and revenue trends.
+2. **Retention command center:** high-risk accounts, explainable risk drivers, next-best actions, and exportable action queue.
+3. **Cohort retention:** retention by signup month and customer age.
+4. **Churn drivers:** cancellation reasons and plan breakdown.
+5. **Revenue simulator:** outreach coverage and assumed save-rate scenario.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  A[Raw customer / subscription / event tables] --> B[Data quality and cleaning]
-  B --> C[Star schema: dimensions + monthly fact]
-  C --> D[Metrics and cohort analysis]
-  D --> E[Streamlit executive dashboard]
-  D --> F[CSV exports / Power BI measures]
+  A[Customer, billing, usage, support and NPS signals] --> B[Python data quality pipeline]
+  B --> C[SQL star schema]
+  B --> D[Explainable customer health score]
+  D --> E[Next-best-action queue]
+  C --> F[Business metrics and cohort analysis]
+  E --> G[Streamlit Retention Command Center]
+  F --> G
 ```
 
-## Business user and decisions
+## Data and realism
 
-**Primary users:** VP of Customer Success and SaaS Finance lead.  
-**Decision:** Which segments and churn reasons deserve retention attention, and what is the modeled recurring-revenue effect of reducing monthly churn?
-
-The dashboard supports action planning. It does not claim that the synthetic data represents a real company's churn or savings. See [business decisions](docs/business_decisions.md).
-
-## Key features
-
-- Reproducible synthetic source tables with intentionally introduced quality issues.
-- Cleaning and validation pipeline with a JSON quality report.
-- Star schema: `dim_customer`, `dim_plan`, `dim_month`, and `fact_subscription_monthly`.
-- Monthly MRR, active customer, churn, and ARPA metrics.
-- Signup-cohort retention matrix.
-- Churn reason and customer segment views.
-- Adjustable churn-reduction scenario.
-- SQL DDL and analytical queries, Power BI DAX measures, and an RLS implementation guide.
-- Pytest suite and GitHub Actions workflow.
-
-## Repository structure
-
-```text
-app/                 Streamlit dashboard
-src/data/            Reproducible source-data generator
-src/metrics/         Subscription, cohort, and scenario metrics
-src/pipeline/        Cleaning, quality reporting, and star-schema build
-data/                Generated raw, cleaned, and warehouse CSVs
-sql/                 Warehouse DDL and analysis queries
-powerbi/             DAX measures and RLS design
-tests/               Unit and pipeline tests
-docs/                Business framing, data quality, metric definitions
-```
+The reproducible generator creates synthetic customer and subscription records with engagement signals. The pipeline intentionally injects duplicate rows, missing values, malformed dates, inconsistent categories, and a negative price to demonstrate data-quality checks. No real customer data is included.
 
 ## Run locally
 
@@ -74,25 +65,14 @@ streamlit run app/main.py
 pytest -q
 ```
 
-## Data model and grain
+## Engineering details
 
-`fact_subscription_monthly` is a month-end snapshot with one row per active customer per month. It joins to customer, plan, and month dimensions. See [warehouse schema](sql/warehouse_schema.sql).
+- Python ETL and validation.
+- SQL star schema with customer, plan, and month dimensions plus monthly subscription fact.
+- Power BI DAX measures and documented RLS pattern.
+- Streamlit and Plotly interactive app.
+- Docker and GitHub Actions test workflow.
 
-## Evaluation and limitations
+## Limitations and trade-offs
 
-- Tests validate metric calculations, duplicate detection, and core warehouse output.
-- Synthetic source data contains known defects so the cleaning pipeline can be inspected.
-- The churn-reduction slider is a deterministic scenario model, not a causal estimate.
-- The simple LTV proxy omits gross margin, discounting, expansion revenue, and acquisition cost.
-- No predictive churn model is claimed; future churn outcomes must not be used as predictive features.
-- RLS is documented as a deployment pattern; it is not an active security boundary in this local demo.
-
-## Trade-offs
-
-A transparent monthly snapshot and simple deterministic scenario were chosen so business users can audit the calculations. A production deployment should load source data incrementally, use a warehouse such as PostgreSQL/Snowflake, add role-specific access controls, and validate results against billing-system totals.
-
-## Next steps for production
-
-1. Replace synthetic CSV sources with an authenticated billing API or warehouse tables.
-2. Add dbt tests and incremental models for the monthly fact.
-3. Deploy Streamlit or publish a Power BI report with tested RLS roles.
+The dataset is synthetic. The risk score is a transparent rules-based prioritization heuristic; it has not been trained or validated against real churn outcomes. The revenue-at-risk value is risk-weighted MRR, not a booked financial liability. The save-rate simulator is an assumption-based scenario, not a forecast or causal impact estimate. A production version should calibrate scores against historical outcomes, test intervention lift, and add authenticated data access.

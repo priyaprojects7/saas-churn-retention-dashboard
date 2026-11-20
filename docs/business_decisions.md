@@ -1,14 +1,20 @@
 # Business framing and decision guide
 
-## Primary user
+## Primary users
 VP of Customer Success and SaaS Finance lead.
 
-## Decision supported
-Which customer segments and churn reasons should receive retention attention, and what would a lower monthly churn assumption mean for recurring revenue?
+## Decisions supported
+- Which active customer accounts should the team contact first?
+- What intervention best fits the observed risk signals?
+- What recurring revenue is exposed to modeled churn risk?
+- How much revenue might a retention campaign preserve under explicit assumptions?
 
-## Example action framework
-1. If a plan has above-average churn and meaningful MRR exposure, review onboarding and adoption before offering discounts.
-2. If low usage is a leading cancellation reason, trigger customer-success outreach for accounts with falling product activity.
-3. If service issues dominate cancellations in a segment, route those accounts to support leadership and track resolution time.
+## Next-best-action rules
+- Multiple payment failures: payment recovery and billing support.
+- High support-ticket burden: service recovery and escalation.
+- Low or sharply declining usage: guided onboarding and product adoption support.
+- Low NPS: personal customer-success check-in.
+- Otherwise: proactive value review.
 
-These are decision rules, not findings about a real company. Inspect the generated report before claiming which segment or reason is largest. Scenario output is based on synthetic data, not realized savings or causal impact.
+## Impact interpretation
+The risk score is a transparent prioritization heuristic, not a validated probability of churn. Risk-adjusted MRR is an exposure indicator, not a financial liability. The intervention simulator multiplies risk-adjusted MRR by outreach coverage and an assumed save rate. It is not a causal estimate, forecast, or guaranteed saving. Validate score calibration and intervention lift using real historical outcomes before operational use.
