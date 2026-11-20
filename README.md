@@ -1,51 +1,55 @@
-# SaaS Churn & Retention Executive Dashboard
+# Business Investigation Workbench
 
-**Live demo:** Not deployed yet. Run locally using the steps below.
+A Streamlit portfolio project that helps an analyst move from subscription data to a business explanation, a simple forecast, and a decision scenario.
 
-## The business problem
+**Live demo:** The Streamlit Community Cloud deployment should update from the main branch after the latest commits finish building.
 
-A subscription business can see how many customers cancelled last month, but that does not tell its customer-success team who to contact today. This project turns subscription, product-usage, support, billing, and feedback signals into an explainable retention action queue.
+## What problem does it address?
 
-**Primary users:** VP of Customer Success and SaaS Finance lead.  
-**Decision supported:** Which active accounts should the team contact first, what action should they take, and what recurring revenue is exposed?
+A business manager notices that recurring revenue has fallen. An analyst has to check the data, find where the change happened, estimate the business impact, consider what might happen next, and explain the findings.
 
-## The differentiator: Retention Command Center
+This app brings several of those steps into one workspace. The analyst remains responsible for checking the evidence and deciding what action to take.
 
-The project goes beyond a standard churn dashboard with an explainable customer-health score and next-best-action queue.
+## Workspaces
 
-- Scores each active account from 0 (lower risk) to 100 (higher risk) using product usage, usage decline, support burden, payment failures, and NPS.
-- Explains the score using fixed weights rather than a black-box model.
-- Recommends a next action such as payment recovery, service escalation, guided onboarding, or a customer-success check-in.
-- Ranks high-risk accounts by risk-adjusted monthly revenue and exports a prioritized contact queue.
-- Simulates the modeled revenue retained under user-selected outreach coverage and assumed save rate.
+1. **Business overview:** Monthly recurring revenue (MRR), active customers, churn and average revenue per account.
+2. **Why did it change?:** Compare the latest month with the previous month and break MRR changes down by plan, acquisition channel or industry. The breakdown points to where to investigate; it does not prove cause.
+3. **What happens next?:** Extend recent MRR or customer-count trends for 3–12 months, with a simple uncertainty range.
+4. **Early warnings:** Flag unusually large month-to-month MRR movements using a transparent historical threshold.
+5. **Customer actions:** Rank active accounts using explainable product usage, support, billing and NPS rules; export a follow-up list.
+6. **Customer retention:** Compare retention across signup-month groups.
+7. **What-if decisions:** Compare a baseline with a hypothetical churn reduction and price change.
+8. **Business briefing:** Create a downloadable summary of the latest business position and its limitations.
 
-The score is a transparent heuristic, not a trained or validated prediction model. The intervention simulator is a what-if calculation, not a causal estimate or guarantee.
+## What makes the analysis inspectable?
 
-## Executive dashboard
+- The risk score uses visible, fixed weights rather than an unexplained score.
+- Segment comparisons show the underlying group-level revenue values.
+- Forecasts use a simple linear trend over recent observations.
+- Early-warning thresholds are calculated from the historical changes.
+- Scenario assumptions are shown alongside the result.
+- The app labels synthetic data, estimates and non-causal comparisons clearly.
 
-The app includes five workspaces:
-1. **Executive overview:** MRR, active customers, churn, ARPA, and revenue trends.
-2. **Retention command center:** high-risk accounts, explainable risk drivers, next-best actions, and exportable action queue.
-3. **Cohort retention:** retention by signup month and customer age.
-4. **Churn drivers:** cancellation reasons and plan breakdown.
-5. **Revenue simulator:** outreach coverage and assumed save-rate scenario.
+## Data and assumptions
+
+The included dataset is synthetic. It is useful for demonstrating the workflow but does not represent a real company's performance. The customer risk score is a hand-built prioritization rule, not a trained churn model. The forecast is a baseline trend estimate, not a validated forecasting model. The what-if simulator assumes customer mix and new signups stay constant and does not estimate how customers would react to a price change.
+
+The current investigation compares monthly recurring revenue across available segments. It does not yet connect arbitrary company systems, establish causal drivers, calculate full profit impact, or learn whether a past intervention worked.
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-  A[Customer, billing, usage, support and NPS signals] --> B[Python data quality pipeline]
-  B --> C[SQL star schema]
-  B --> D[Explainable customer health score]
-  D --> E[Next-best-action queue]
-  C --> F[Business metrics and cohort analysis]
-  E --> G[Streamlit Retention Command Center]
-  F --> G
+flowchart TD
+  A[Subscription and customer records] --> B[Validation and monthly metrics]
+  B --> C[Segment change investigation]
+  B --> D[Trend forecast and early warnings]
+  A --> E[Explainable customer risk rules]
+  C --> F[Business briefing]
+  D --> F
+  E --> G[Customer follow-up queue]
+  F --> H[Streamlit workbench]
+  G --> H
 ```
-
-## Data and realism
-
-The reproducible generator creates synthetic customer and subscription records with engagement signals. The pipeline intentionally injects duplicate rows, missing values, malformed dates, inconsistent categories, and a negative price to demonstrate data-quality checks. No real customer data is included.
 
 ## Run locally
 
@@ -65,14 +69,14 @@ streamlit run app/main.py
 pytest -q
 ```
 
+## Next steps for a production-grade version
+
+- Connect to databases and multiple source files, with explicit join suggestions and data lineage.
+- Add more rigorous forecasting with backtesting and seasonality checks.
+- Add root-cause investigation across product usage, support, billing and sales signals.
+- Track business actions and compare expected outcomes with what actually happened.
+- Add authentication, per-user data isolation and durable private storage before accepting confidential company data.
+
 ## Engineering details
 
-- Python ETL and validation.
-- SQL star schema with customer, plan, and month dimensions plus monthly subscription fact.
-- Power BI DAX measures and documented RLS pattern.
-- Streamlit and Plotly interactive app.
-- Docker and GitHub Actions test workflow.
-
-## Limitations and trade-offs
-
-The dataset is synthetic. The risk score is a transparent rules-based prioritization heuristic; it has not been trained or validated against real churn outcomes. The revenue-at-risk value is risk-weighted MRR, not a booked financial liability. The save-rate simulator is an assumption-based scenario, not a forecast or causal impact estimate. A production version should calibrate scores against historical outcomes, test intervention lift, and add authenticated data access.
+Python, pandas, NumPy, Streamlit, Plotly, SQL warehouse schema, Power BI DAX examples, pytest and GitHub Actions.
