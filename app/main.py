@@ -201,7 +201,6 @@ with cohorts:
             "of months since signup. Each cell is the percentage still active. Darker cells indicate "
             "higher retention. Compare the same column across rows to compare cohorts at the same age."
         )
-        first_age = matrix.iloc[:, 0].dropna()
         last_age = matrix.apply(lambda row: row.dropna().iloc[-1] if row.notna().any() else float("nan"), axis=1)
         st.markdown("**What the cohort data shows**")
         if len(last_age.dropna()) > 1:
