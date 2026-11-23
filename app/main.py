@@ -88,7 +88,7 @@ with investigate:
         else:
             dimension = st.selectbox("Break it down by", dims, format_func=lambda x: x.replace("_", " ").title())
             if measure == "Monthly recurring revenue":
-                breakdown = segment_revenue_change(df, previous.month, latest.month, dimension)
+                breakdown = segment_revenue_change(df, latest.month, previous.month, dimension)
                 delta = float(latest.mrr - previous.mrr)
                 st.metric("Overall MRR change", money(delta))
                 st.write("Groups with the largest declines appear first. A group's change is its current recurring revenue minus its previous-month recurring revenue.")
@@ -208,7 +208,7 @@ with briefing:
             f"- Active customers: {int(latest.active_customers):,} ({customer_delta:+,} vs. previous month).",
             f"- Monthly churn: {latest.monthly_churn_rate:.1%} ({churn_delta:+.1%} vs. previous month).",
         ]
-        by_plan = segment_revenue_change(df, previous.month, latest.month, "plan") if "plan" in df else pd.DataFrame()
+        by_plan = segment_revenue_change(df, latest.month, previous.month, "plan") if "plan" in df else pd.DataFrame()
         if not by_plan.empty:
             worst = by_plan.iloc[0]
             lines.append(f"- Largest plan-level MRR decline: {worst['plan']} ({money(worst['change'])}). This is a place to investigate, not proof of cause.")
